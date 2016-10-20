@@ -9,6 +9,39 @@ import work from 'webworkify';
 import transmuxWorker from './transmuxer-worker';
 import {isAudioCodec, isVideoCodec} from './codec-utils';
 
+// Fudge factor to account for TimeRanges rounding
+const TIME_FUDGE_FACTOR = 1 / 30;
+
+const filterRanges = function(timeRanges, predicate) {
+  let results = [];
+  let i;
+
+  if (timeRanges && timeRanges.length) {
+    // Search for ranges that match the predicate
+    for (i = 0; i < timeRanges.length; i++) {
+      if (predicate(timeRanges.start(i), timeRanges.end(i))) {
+        results.push([timeRanges.start(i), timeRanges.end(i)]);
+      }
+    }
+  }
+
+  return videojs.createTimeRanges(results);
+};
+
+/**
+ * Attempts to find the buffered TimeRange that contains the specified
+ * time.
+ * @param {TimeRanges} buffered - the TimeRanges object to query
+ * @param {number} time  - the time to filter on.
+ * @returns {TimeRanges} a new TimeRanges object
+ */
+const findRange = function(buffered, time) {
+  return filterRanges(buffered, function(start, end) {
+    return start - TIME_FUDGE_FACTOR <= time &&
+      end + TIME_FUDGE_FACTOR >= time;
+  });
+};
+
 /**
  * VirtualSourceBuffers exist so that we can transmux non native formats
  * into a native format, but keep the same api as a native source buffer.
@@ -456,8 +489,9 @@ export default class VirtualSourceBuffer extends videojs.EventTarget {
     }
     if (!this.audioDisabled_ && this.audioBuffer_) {
       let buffered = this.audioBuffer_.buffered;
-      if (buffered.length) {
-        let end = buffered.end(buffered.length - 1);
+      let currentBuffered = findRange(buffered, this.mediaSource_.tech_.currentTime());
+      if (currentBuffered.length) {
+        let end = buffered.end(0);
         this.audioBuffer_.appendWindowStart = end;
       } else {
         this.audioBuffer_.appendWindowStart = 0;
