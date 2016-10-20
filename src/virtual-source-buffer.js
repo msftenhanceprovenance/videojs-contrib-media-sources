@@ -489,7 +489,8 @@ export default class VirtualSourceBuffer extends videojs.EventTarget {
     }
     if (!this.audioDisabled_ && this.audioBuffer_) {
       let buffered = this.audioBuffer_.buffered;
-      let currentBuffered = findRange(buffered, this.mediaSource_.tech_.currentTime());
+      let player = this.mediaSource_.player_;
+      let currentBuffered = findRange(buffered, player.currentTime());
       if (currentBuffered.length) {
         let end = buffered.end(0);
         this.audioBuffer_.appendWindowStart = end;
