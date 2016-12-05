@@ -14,8 +14,7 @@
  */
 import window from 'global/window';
 import flv from 'mux.js/lib/flv';
-
-const BYTES_PER_CHUNK = 0x10000;
+import FlashConstants from './flash-constants';
 
 /**
  * Assemble the FLV tags in decoder order
@@ -82,8 +81,8 @@ const convertTagsToData_ = function(tags, targetPts) {
   let b64Chunks = [];
 
   for (let chunkStart = 0, l = segment.byteLength;
-    chunkStart < l; chunkStart += BYTES_PER_CHUNK) {
-    let chunkEnd = Math.min(chunkStart + BYTES_PER_CHUNK, l);
+    chunkStart < l; chunkStart += FlashConstants.BYTES_PER_CHUNK) {
+    let chunkEnd = Math.min(chunkStart + FlashConstants.BYTES_PER_CHUNK, l);
 
     let chunk = segment.subarray(chunkStart, chunkEnd);
 

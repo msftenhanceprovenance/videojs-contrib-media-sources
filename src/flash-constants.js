@@ -14,7 +14,7 @@
 const flashConstants = {
   // times in milliseconds
   TIME_BETWEEN_CHUNKS: 0,
-  BYTES_PER_CHUNK: 1024 * 4
+  BYTES_PER_CHUNK: 0x10000
 };
 
 export default flashConstants;

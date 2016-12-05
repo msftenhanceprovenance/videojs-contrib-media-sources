@@ -89,10 +89,12 @@ export default class FlashSourceBuffer extends videojs.EventTarget {
     );
 
     window.encodedHeaderSuperSecret = function () {
+      delete window.encodedHeaderSuperSecret;
+
       throw encodedHeader;
     };
 
-    this.mediaSource_.swfObj.vjs_appendBuffer('encodedHeaderSuperSecret');
+    this.mediaSource_.swfObj.vjs_appendChunkReady('encodedHeaderSuperSecret');
 
     // TS to FLV transmuxer
     this.transmuxer_ = work(transmuxWorker);
@@ -257,6 +259,8 @@ export default class FlashSourceBuffer extends videojs.EventTarget {
       if (this.buffer_.length !== 0) {
         scheduleTick(this.processBuffer_.bind(this));
       } else {
+        delete window.throwDataSuperSecret;
+
         this.updating = false;
         this.trigger({ type: 'updateend' });
       }
@@ -264,7 +268,7 @@ export default class FlashSourceBuffer extends videojs.EventTarget {
       throw b64str
     }.bind(this);
 
-    this.mediaSource_.swfObj.vjs_appendBuffer('throwDataSuperSecret');
+    this.mediaSource_.swfObj.vjs_appendChunkReady('throwDataSuperSecret');
   }
 
   calculateTargetPts_(basePts, length) {
