@@ -15,6 +15,15 @@
 import window from 'global/window';
 import flv from 'mux.js/lib/flv';
 
+const BYTES_PER_CHUNK = 0x10000;
+
+/**
+ * Assemble the FLV tags in decoder order
+ *
+ * @function orderTags
+ * @param {Object} tags object containing video and audio tags
+ * @return {Object} object containing the filtered array of tags and total bytelength
+ */
 const orderTags = function(tags) {
   let videoTags = tags.videoTags;
   let audioTags = tags.audioTags;
@@ -35,12 +44,60 @@ const orderTags = function(tags) {
       // video should be decoded next
       tag = videoTags.shift();
     }
-
     ordered.push(tag);
   }
 
-  return ordered;
-}
+  return ordered
+};
+
+/**
+ * Turns an array of flv tags into a Uint8Array representing the
+ * flv data.
+ *
+ * @function convertTagsToData
+ * @param {Array} list of flv tags
+ */
+const convertTagsToData_ = function(tags, targetPts) {
+  let filtered = [];
+  let len = 0;
+
+  for (let i = 0, l = tags.length; i < l; i++) {
+    if (tags[i].pts >= targetPts) {
+      filtered.push(tags[i]);
+      len += tags[i].bytes.length;
+    }
+  }
+
+  if (filtered.length === 0) {
+    return [];
+  }
+
+  let segment = new Uint8Array(len);
+
+  for (let i = 0, j = 0, l = filtered.length; i < l; i++) {
+    segment.set(filtered[i].bytes, j);
+    j += filtered[i].bytes.byteLength;
+  }
+
+  let b64Chunks = [];
+
+  for (let chunkStart = 0, l = segment.byteLength;
+    chunkStart < l; chunkStart += BYTES_PER_CHUNK) {
+    let chunkEnd = Math.min(chunkStart + BYTES_PER_CHUNK, l);
+
+    let chunk = segment.subarray(chunkStart, chunkEnd);
+
+    let binary = [];
+
+    for (let chunkByte = 0; chunkByte < chunk.byteLength; chunkByte++) {
+      binary.push(String.fromCharCode(chunk[chunkByte]));
+    }
+
+    b64Chunks.push(window.btoa(binary.join('')));
+  }
+
+  return b64Chunks;
+};
 
 /**
  * Re-emits tranmsuxer events by converting them into messages to the
@@ -50,17 +107,21 @@ const orderTags = function(tags) {
  * @private
  */
 const wireTransmuxerEvents = function(transmuxer) {
-  transmuxer.on('data', function(segment) {
+  transmuxer.on('data', (segment) => {
+    this.tags = orderTags(segment.tags);
 
-    segment.tags = orderTags(segment.tags);
+    delete segment.tags;
+
+    segment.basePts = this.tags[0].pts;
+    segment.length = this.tags.length;
 
     window.postMessage({
-      action: 'data',
+      action: 'metadata',
       segment
     });
   });
 
-  transmuxer.on('done', function(data) {
+  transmuxer.on('done', (data) => {
     window.postMessage({ action: 'done' });
   });
 };
@@ -76,6 +137,8 @@ class MessageHandlers {
   constructor(options) {
     this.options = options || {};
     this.init();
+    this.tags = [];
+    this.targetPts_ = 0;
   }
 
   /**
@@ -86,7 +149,18 @@ class MessageHandlers {
       this.transmuxer.dispose();
     }
     this.transmuxer = new flv.Transmuxer(this.options);
-    wireTransmuxerEvents(this.transmuxer);
+    wireTransmuxerEvents.call(this, this.transmuxer);
+  }
+
+  convertTagsToData(data) {
+    this.targetPts_ = data.targetPts;
+
+    let b64 = convertTagsToData_(this.tags, this.targetPts_);
+
+    window.postMessage({
+      action:'data',
+      b64
+    });
   }
 
   /**

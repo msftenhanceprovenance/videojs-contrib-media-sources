@@ -98,8 +98,12 @@ export default class FlashSourceBuffer extends videojs.EventTarget {
     this.transmuxer_ = work(transmuxWorker);
     this.transmuxer_.postMessage({ action: 'init', options: {} });
     this.transmuxer_.onmessage = (event) => {
-      if (event.data.action === 'data') {
+      if (event.data.action === 'metadata') {
         this.receiveBuffer_(event.data.segment);
+      }
+      if (event.data.action === 'data') {
+        this.buffer_ = this.buffer_.concat(event.data.b64);
+        scheduleTick(this.processBuffer_.bind(this));
       }
     };
 
@@ -226,19 +230,9 @@ export default class FlashSourceBuffer extends videojs.EventTarget {
     createTextTracksIfNecessary(this, this.mediaSource_, segment);
     addTextTrackData(this, segment.captions, segment.metadata);
 
-    // Do this asynchronously since convertTagsToData_ can be time consuming
-    scheduleTick(() => {
-      let flvBytes = this.convertTagsToData_(segment);
+    let targetPts = this.calculateTargetPts_(segment.basePts, segment.length);
 
-      if (this.buffer_.length === 0) {
-        scheduleTick(this.processBuffer_.bind(this));
-      }
-
-      if (flvBytes) {
-        this.buffer_.push(flvBytes);
-        this.bufferSize_ += flvBytes.byteLength;
-      }
-    });
+    this.transmuxer_.postMessage({ action: 'convertTagsToData', targetPts });
   }
 
   /**
@@ -247,7 +241,6 @@ export default class FlashSourceBuffer extends videojs.EventTarget {
    * @private
    */
   processBuffer_() {
-    let chunkSize = FlashConstants.BYTES_PER_CHUNK;
 
     if (!this.buffer_.length) {
       if (this.updating !== false) {
@@ -258,67 +251,29 @@ export default class FlashSourceBuffer extends videojs.EventTarget {
       return;
     }
 
-    // concatenate appends up to the max append size
-    let chunk = this.buffer_[0].subarray(0, chunkSize);
-
-    // requeue any bytes that won't make it this round
-    if (chunk.byteLength < chunkSize ||
-        this.buffer_[0].byteLength === chunkSize) {
-      this.buffer_.shift();
-    } else {
-      this.buffer_[0] = this.buffer_[0].subarray(chunkSize);
-    }
-
-    this.bufferSize_ -= chunk.byteLength;
-
-    // base64 encode the bytes
-    let binary = [];
-    let length = chunk.byteLength;
-
-    for (let i = 0; i < length; i++) {
-      binary.push(String.fromCharCode(chunk[i]));
-    }
-    let b64str = window.btoa(binary.join(''));
+    let b64str = this.buffer_.shift();
 
     window.throwDataSuperSecret = function () {
-      // schedule another append if necessary
-      if (this.bufferSize_ !== 0) {
+      if (this.buffer_.length !== 0) {
         scheduleTick(this.processBuffer_.bind(this));
       } else {
         this.updating = false;
         this.trigger({ type: 'updateend' });
       }
 
-      throw b64str;
+      throw b64str
     }.bind(this);
 
     this.mediaSource_.swfObj.vjs_appendBuffer('throwDataSuperSecret');
   }
 
-  /**
-   * Turns an array of flv tags into a Uint8Array representing the
-   * flv data. Also removes any tags that are before the current
-   * time so that playback begins at or slightly after the right
-   * place on a seek
-   *
-   * @private
-   * @param {Object} segmentData object of segment data
-   */
-  convertTagsToData_(segmentData) {
-    let segmentByteLength = 0;
+  calculateTargetPts_(basePts, length) {
+    if (isNaN(this.basePtsOffset_) && length) {
+      this.basePtsOffset_ = basePts;
+    }
+
     let tech = this.mediaSource_.tech_;
     let targetPts = 0;
-    let i;
-    let j;
-    let segment;
-    let filteredTags = [];
-    let tags = segmentData.tags;
-
-    // Establish the media timeline to PTS translation if we don't
-    // have one already
-    if (isNaN(this.basePtsOffset_) && tags.length) {
-      this.basePtsOffset_ = tags[0].pts;
-    }
 
     // Trim to currentTime if it's ahead of buffered or buffered doesn't exist
     if (tech.seeking()) {
@@ -329,27 +284,6 @@ export default class FlashSourceBuffer extends videojs.EventTarget {
     targetPts *= 1e3;
     targetPts += this.basePtsOffset_;
 
-    // skip tags with a presentation time less than the seek target
-    for (i = 0; i < tags.length; i++) {
-      if (tags[i].pts >= targetPts) {
-        filteredTags.push(tags[i]);
-      }
-    }
-
-    if (filteredTags.length === 0) {
-      return;
-    }
-
-    // concatenate the bytes into a single segment
-    for (i = 0; i < filteredTags.length; i++) {
-      segmentByteLength += filteredTags[i].bytes.byteLength;
-    }
-    segment = new Uint8Array(segmentByteLength);
-    for (i = 0, j = 0; i < filteredTags.length; i++) {
-      segment.set(filteredTags[i].bytes, j);
-      j += filteredTags[i].bytes.byteLength;
-    }
-
-    return segment;
+    return targetPts;
   }
 }
