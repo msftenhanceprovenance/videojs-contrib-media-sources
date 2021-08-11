@@ -43,6 +43,10 @@
     "watch:test:js": "node scripts/watch-test.js",
     "prepublish": "npm run build"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mjneil/videojs-contrib-media-sources.git"
+  },
   "keywords": [
     "videojs",
     "videojs-plugin"
